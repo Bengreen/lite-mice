@@ -13,18 +13,31 @@
 CRGB leds[NUM_LEDS];
 
 const int delayTime = 1;
-const int maxSpr = 20;
-int numSpr = 8;
-const int slowest = 30;
+const int maxMice = 20;
+int mouseTrainStart = 0;
+int mouseTrainEnd = 0;
+const byte maxTime = 30;
 
-CRGB sprColour[maxSpr] = {CRGB::Black};
-int sprWaitTime[maxSpr] = {1};
-int sprMove[maxSpr] = {1};
-int sprPosition[maxSpr] = {0};
-int sprTime[maxSpr] = {0};
+struct LiteMouse
+{
+  CRGB colour;
+  byte waitTime;
+  short step;
+  byte time;
+  int position;
+};
+
+LiteMouse mice[maxMice] = {
+    {
+        .colour = CRGB::Black,
+        .waitTime = 1,
+        .step = 1,
+        .time = 0,
+        .position = 0,
+    }};
 
 unsigned long debounceConfirmTime = 0;
-unsigned long stateStart = 0;
+unsigned long stateStartTime = 0;
 const unsigned long debounceDelay = 50;
 const unsigned long longPress = 500;
 
@@ -43,38 +56,43 @@ enum buttonState
 int buttonsState = 3;               // the initial state
 int buttonsPrevious = buttonsState; // Initial state
 
-CRGB mergeColour(int pos)
+CRGB mergeMouseColour(int pos)
 {
   CRGB sumColour = CRGB::Black;
-  for (int spr = 0; spr < numSpr; ++spr)
+  for (int mouse = mouseTrainStart; mouse != mouseTrainEnd; mouse = (mouse + 1) % maxMice)
   {
-    if (sprPosition[spr] == pos)
+    if (mice[mouse].position == pos)
     {
-      sumColour += sprColour[spr];
+      sumColour += mice[mouse].colour;
     }
   }
   return sumColour;
 }
 
-void setSprite(int spr, int hue, int sat = 255, int magicVal = -1)
+void setMouse(int mouse, int hue, int sat = 255, int magicVal = -1)
 {
+
+  int val = (magicVal == -1) ? random(255) : magicVal;
   Serial.print("New Mouse: ");
-  Serial.print(spr);
+  Serial.print(mouse);
   Serial.print(" = (");
   Serial.print(hue);
   Serial.print(", ");
   Serial.print(sat);
   Serial.print(", ");
-  Serial.print(magicVal);
+  Serial.print(val);
+  Serial.print(magicVal == -1 ? " MAGIC" : " SET");
   Serial.println(")");
+  byte time = byte(maxTime - (val * maxTime / 255 - 1));
 
-  int val = (magicVal == -1) ? random(255) : magicVal;
-
-  sprWaitTime[spr] = slowest - (val * slowest / 255 - 1);
-  sprMove[spr] = 1;
-  sprTime[spr] = sprWaitTime[spr];
-  sprColour[spr] = CHSV(hue, sat, val);
-  sprPosition[spr] = 0;
+  mice[mouse] = {
+      .colour = CHSV(hue, sat, val),
+      .waitTime = time,
+      .step = 1,
+      .time = time,
+      .position = 0,
+  };
+  Serial.println("updated mouse");
 }
 
 /*
@@ -87,9 +105,12 @@ void setup()
 {
   Serial.begin(9600);
   Serial.println("Booted....");
+  Serial.println(sizeof(struct LiteMouse));
+  Serial.println(sizeof(CRGB));
+  Serial.println(sizeof(mice));
+
   // initialize digital pin LED_BUILTIN as an output.
   pinMode(LED_BUILTIN, OUTPUT);
-  // pinMode(PIN09, OUTPUT);
   pinMode(LED0_PIN, OUTPUT);
   pinMode(LED1_PIN, OUTPUT);
   pinMode(BUTTON0_PIN, INPUT_PULLUP);
@@ -98,58 +119,60 @@ void setup()
 
   FastLED.addLeds<NEOPIXEL, PIXEL_PIN>(leds, NUM_LEDS);
 
-  for (int spr = 0; spr < numSpr; ++spr)
-  {
-    setSprite(spr, random(255));
-  }
-  //Do all colours and positions first before setting LEDs
-  for (int spr = 0; spr < numSpr; ++spr)
-  {
-    leds[sprPosition[spr]] = mergeColour(sprPosition[spr]);
-  }
   Serial.println("Booted.");
 }
-
-int ledState = LOW;
 
 // the loop function runs over and over again forever
 void loop()
 {
-  for (int sprite = 0; sprite < numSpr; ++sprite)
+  // Serial.print("[");
+  // Serial.print(mouseTrainStart);
+  // Serial.print(", ");
+  // Serial.print(mouseTrainEnd);
+  // Serial.println("]");
+  for (int mouse = mouseTrainStart; mouse != mouseTrainEnd; mouse = (mouse + 1) % maxMice)
   {
-    if (sprTime[sprite] == 0)
+    // Serial.print("Checking mouse ");
+    // Serial.println(mouse);
+    if (mice[mouse].time == 0)
     {
-      ledState = ledState == LOW ? HIGH : LOW;
-      int oldPos = sprPosition[sprite];
-
-      //leds[sprPosition[sprite]]-=sprColour[sprite]; //Sprite leaves this place
-      if (sprPosition[sprite] + sprMove[sprite] >= NUM_LEDS)
+      // Serial.print("Moving mouse ");
+      // Serial.print(mouse);
+      int oldPos = mice[mouse].position;
+      // Serial.print(" from ");
+      // Serial.println(oldPos);
+      if (mice[mouse].position + mice[mouse].step >= NUM_LEDS)
       {
-        sprPosition[sprite] = NUM_LEDS - 1 - (sprPosition[sprite] + sprMove[sprite] - (NUM_LEDS - 1));
-        sprMove[sprite] = -sprMove[sprite];
+        // Serial.print("END OF TRACK ");
+        mice[mouse].position = NUM_LEDS - 1 - (mice[mouse].position + mice[mouse].step - (NUM_LEDS - 1));
+        mice[mouse].step = -mice[mouse].step;
       }
-      else if (sprPosition[sprite] + sprMove[sprite] < 0)
+      else if (mice[mouse].position + mice[mouse].step < 0)
       {
-        sprPosition[sprite] = -(sprPosition[sprite] + sprMove[sprite]);
-        sprMove[sprite] = -sprMove[sprite];
+        // Serial.print("START OF TRACK ");
+        mice[mouse].position = -(mice[mouse].position + mice[mouse].step);
+        mice[mouse].step = -mice[mouse].step;
       }
       else
       {
-        sprPosition[sprite] += sprMove[sprite];
+        mice[mouse].position += mice[mouse].step;
+        // Serial.println("Moving to ");
       }
+      // Serial.print(mice[mouse].position);
+      // Serial.print("-");
+      // Serial.println(mice[mouse].step);
       //Clean colour of old position
-      leds[oldPos] = mergeColour(oldPos);
+      leds[oldPos] = mergeMouseColour(oldPos);
       //Set colour of new position
-      leds[sprPosition[sprite]] = mergeColour(sprPosition[sprite]);
+      leds[mice[mouse].position] = mergeMouseColour(mice[mouse].position);
       //Set new wait time
-      sprTime[sprite] = sprWaitTime[sprite];
+      mice[mouse].time = mice[mouse].waitTime;
     }
-    sprTime[sprite]--;
+    mice[mouse].time--;
   }
 
   FastLED.show();
 
-  digitalWrite(LED_BUILTIN, ledState); // turn the LED on (HIGH is the voltage level)
   int wheelRead = analogRead(WHEEL_PIN);
   int buttons = (digitalRead(BUTTON1_PIN) << 1) | digitalRead(BUTTON0_PIN);
   unsigned long tnow = millis();
@@ -181,10 +204,10 @@ void loop()
         break;
       case released: // Trailing edge
         Serial.print("Held for ");
-        Serial.print(tnow - stateStart);
+        Serial.print(tnow - stateStartTime);
         Serial.print(", release from ");
         Serial.println(buttonsState);
-        if ((tnow - stateStart) > longPress)
+        if ((tnow - stateStartTime) > longPress)
         {
           Serial.println("LONGPRESS");
           switch (buttonsState)
@@ -196,7 +219,7 @@ void loop()
             break;
           case button1:
             magicVal = wheelRead / 4;
-            Serial.print("Value");
+            Serial.print("Val = ");
             Serial.println(magicVal);
             break;
           case allHeld:
@@ -208,30 +231,40 @@ void loop()
         else
         {
           Serial.println("SHORT PRESS");
+
           switch (buttonsState)
           {
           case button0:
-            if (numSpr < maxSpr)
+          {
+            int newMouseTrainEnd = (mouseTrainEnd + 1) % maxMice;
+            if (newMouseTrainEnd != mouseTrainStart)
             {
               hue = wheelRead / 4;
-              setSprite(numSpr, hue, sat, magicVal);
-              ++numSpr;
+              setMouse(mouseTrainEnd, hue, sat, magicVal);
+              mouseTrainEnd = newMouseTrainEnd;
+              Serial.print("end = ");
+              Serial.println(mouseTrainEnd);
             }
             else
             {
-              Serial.println("Max Mice");
+              Serial.println("MAX MICE");
             }
-            break;
+          }
+          break;
           case button1:
-            if (numSpr > 0)
+
+            if (mouseTrainStart != mouseTrainEnd)
             {
-              --numSpr;
-              Serial.print("Deleting Mouse: ");
-              Serial.println(numSpr);
+              int oldPosition = mice[mouseTrainStart].position;
+
+              mouseTrainStart = (mouseTrainStart + 1) % maxMice;
+              leds[oldPosition] = mergeMouseColour(oldPosition);
+              Serial.print("start = ");
+              Serial.println(mouseTrainStart);
             }
             else
             {
-              Serial.println("No Mice");
+              Serial.println("NO MICE");
             }
             break;
           case allHeld:
@@ -241,7 +274,7 @@ void loop()
         }
         break;
       }
-      stateStart = tnow;
+      stateStartTime = tnow;
       buttonsState = buttons;
     }
   }
